@@ -1,70 +1,113 @@
 use std::fmt;
 use std::mem;
 
-pub struct Node<T> {
+struct Node<T> {
     data: T,
     next: Option<Box<Node<T>>>
 }
 
+pub struct List<T> {
+    head: Option<Box<Node<T>>>
+}
+
 impl<T> Node<T> {
-    pub fn new(data : T) -> Node<T> {
+    fn new(data : T) -> Node<T> {
         Node{ data : data , next : None }
     }
 
-    pub fn length(&self) -> usize {
+    fn length(&self) -> usize {
         match *self {
             Node{data : _, next : Some(ref next)} => 1 + next.length(),
             Node{data : _, next : _}              => 1
         }
     }
 
-    pub fn last(&self) -> &Node<T> {
+    fn last(&self) -> &Node<T> {
         match *self {
             Node{data : _, next : Some(ref next)} => next.last(),
             Node{data : _, next : _}              => self
         }
     }
 
-    pub fn last_mut(&mut self) -> &mut Node<T> {
+    fn last_mut(&mut self) -> &mut Node<T> {
         match *self {
             Node{data : _, next : Some(ref mut next)} => next.last_mut(),
             Node{data : _, next : _}                  => self
         }
     }
 
-    pub fn append(&mut self, node: Node<T>) {
+    fn append(&mut self, node: Node<T>) {
         self.last_mut().next = Some(Box::new(node));
     }
 
-    pub fn prepend(&mut self, node: Node<T>) {
+    fn prepend(&mut self, node: Node<T>) {
         let old_self = mem::replace(self, node);
         self.next = Some(Box::new(old_self));
     }
+}
 
-    /* One idiosyncracy is that we don't allow to drop the head of a singleton list. */
-    pub fn drop_head(&mut self) -> Option<Box<Node<T>>> {
-        let old_next = mem::replace(&mut self.next, None);
-        match old_next {
-            Some(boxed_node) => Some(Box::new(mem::replace(self, *boxed_node))),
-            None             => None
+impl<T> List<T> {
+    pub fn new() -> List<T> {
+        List{head : None}
+    }
+
+    pub fn single(data : T) -> List<T> {
+        List{head : Some(Box::new(Node{ data : data, next : None}))}
+    }
+
+    pub fn length(&self) -> usize {
+        match self.head {
+            Some(ref boxed_node) => boxed_node.length(),
+            None => 0
         }
     }
 
-    /* This is less elegant than I hoped; it suggests the proper way is a list class
-     * wrapper; so you could start with an empty list and then remove elements one by
-     * one until you exhaust the current list.
-     */
-    pub fn reverse(&mut self) {
-        if self.next.is_none() {
-            return;
+    pub fn first(&self) -> Option<&Node<T>>
+    {
+        match self.head
+        {
+            None => None,
+            Some(ref boxed_node) => Some(&*boxed_node)
         }
+    }
 
-        let mut new_list = *self.drop_head().unwrap();
-        while self.next.is_some() {
-            new_list.prepend(*self.drop_head().unwrap())
+    pub fn last(&self) -> Option<&Node<T>>
+    {
+        match self.head {
+            Some(ref boxed_node) => Some(boxed_node.last()),
+            None => None
         }
-        let old_self = mem::replace(self, new_list);
-        self.prepend(old_self);
+    }
+
+    pub fn append(&mut self, list: List<T>) {
+        match self.head {
+            Some(ref mut boxed_node) => boxed_node.last_mut().next = list.head,
+            None => self.head = list.head
+        }
+    }
+
+    pub fn prepend(&mut self, mut list: List<T>) {
+        mem::swap(self, &mut list);
+        self.append(list);
+    }
+
+    pub fn drop_head(&mut self) -> Option<List<T>> {
+        let old_head = mem::replace(&mut self.head, None);
+        match old_head {
+            None => None,
+            Some(mut boxed_node) => {
+                self.head = mem::replace(&mut boxed_node.next, None);
+                Some(List{head : Some(boxed_node)})
+            }
+        }
+    }
+
+    pub fn reverse(&mut self) {
+        let mut new_list = List::new();
+        while self.head.is_some() {
+            new_list.prepend(self.drop_head().unwrap())
+        }
+        mem::replace(self, new_list);
     }
 }
 
@@ -77,16 +120,25 @@ impl<T : fmt::Display> fmt::Display for Node<T> {
     }
 }
 
+impl<T : fmt::Display> fmt::Display for List<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.head {
+            Some(ref boxed_node) => write!(f, "{}", *boxed_node),
+            None => write!(f, "<Empty>")
+        }
+    }
+}
+
 
 #[test]
-fn create_singleton_list() {
+fn create_node() {
     let list = Node::new(1);
     assert!(list.data == 1);
     assert!(list.next.is_none());
 }
 
 #[test]
-fn create_and_append() {
+fn create_node_and_append() {
     let mut list = Node::new(1);
     list.append(Node::new(2));
     assert!(list.data == 1);
@@ -95,7 +147,7 @@ fn create_and_append() {
 }
 
 #[test]
-fn create_and_prepend() {
+fn create_node_and_prepend() {
     let mut list = Node::new(2);
     list.prepend(Node::new(1));
     assert!(list.data == 1);
@@ -149,43 +201,43 @@ fn test_last_append_prepend() {
 
 #[test]
 fn test_reverse_singleton() {
-    let mut list = Node::new(1);
+    let mut list = List::single(1);
     list.reverse();
-    assert!(list.last().data == 1);
+    assert!(list.last().unwrap().data == 1);
     assert!(list.length() == 1);
 }
 
 #[test]
 fn test_reverse_longer() {
-    let mut list = Node::new(1);
-    list.append(Node::new(2));
-    list.append(Node::new(3));
-    assert!(list.data == 1);
-    assert!(list.last().data == 3);
+    let mut list = List::single(1);
+    list.append(List::single(2));
+    list.append(List::single(3));
+    assert!(list.first().unwrap().data == 1);
+    assert!(list.last().unwrap().data == 3);
     assert!(list.length() == 3);
     list.reverse();
-    assert!(list.data == 3);
-    assert!(list.last().data == 1);
+    assert!(list.first().unwrap().data == 3);
+    assert!(list.last().unwrap().data == 1);
     assert!(list.length() == 3);
 }
 
 #[test]
 fn test_drop() {
-    let mut list = Node::new(1);
-    list.append(Node::new(2));
-    assert!(list.data == 1);
+    let mut list = List::single(1);
+    list.append(List::single(2));
+    assert!(list.first().unwrap().data == 1);
     assert!(list.length() == 2);
-    let node = list.drop_head();
-    assert!(node.unwrap().data == 1);
-    assert!(list.data == 2);
+    let single_list = list.drop_head();
+    assert!(single_list.unwrap().first().unwrap().data == 1);
+    assert!(list.first().unwrap().data == 2);
     assert!(list.length() == 1);
 }
 
 #[test]
 fn test_drop_singleton() {
-    let mut list = Node::new(1);
+    let mut list = List::single(1);
     let node = list.drop_head();
-    assert!(node.is_none());
-    assert!(list.data == 1);
-    assert!(list.length() == 1);
+    assert!(node.unwrap().first().unwrap().data == 1);
+    assert!(list.first().is_none());
+    assert!(list.length() == 0);
 }
